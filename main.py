@@ -13,13 +13,13 @@ API_KEY = os.environ.get("GEMINI_API_KEY", "")
 client = genai.Client(api_key=API_KEY)
 
 # ═══════════════════════════════════════════════════════════
-# قراءة ملف CSV مباشرة
+# قراءة ملف CSV
 # ═══════════════════════════════════════════════════════════
 try:
     df = pd.read_csv('palestine_tourism_data.csv')
     print(f"✅ تم تحميل {len(df)} مكان سياحي من CSV")
 except Exception as e:
-    print(f"❌ خطأ في قراءة CSV: {e}")
+    print(f" خطأ في قراءة CSV: {e}")
     df = pd.DataFrame()
 
 def prepare_places_for_ai():
@@ -40,7 +40,40 @@ def prepare_places_for_ai():
 places_context = prepare_places_for_ai()
 
 # ═══════════════════════════════════════════════════════════
-# دالة توليد الخطة (نسخة نظيفة وصحيحة 100%)
+# دالة بناء الجملة النصية من الخيارات
+# ══════════════════════════════════════════════════════════
+def build_user_request_from_options(options):
+    """تحويل الخيارات المختارة إلى جملة نصية يفهمها الـ AI"""
+    
+    cities = ", ".join(options.get('cities', []))
+    days = options.get('number_of_days', 1)
+    people = options.get('number_of_people', 1)
+    budget = options.get('budget', 100)
+    interests = ", ".join(options.get('interests', []))
+    start_date = options.get('start_date', '2026-10-15')
+    activity_level = options.get('activity_level', 'moderate')
+    
+    # ترجمة مستوى النشاط
+    level_map = {
+        'relaxed': 'هادئ مع فترات راحة طويلة',
+        'moderate': 'متوازن بين الزيارة والراحة',
+        'intensive': 'مكثف مع زيارة أكبر عدد من الأماكن'
+    }
+    level_ar = level_map.get(activity_level, 'متوازن')
+    
+    # بناء الجملة
+    request_text = f"""
+أريد رحلة لمدة {days} يوم في {cities}.
+عدد الأشخاص: {people} أشخاص.
+الميزانية الإجمالية: {budget} دولار.
+الاهتمامات: {interests}.
+تاريخ البدء: {start_date}.
+مستوى النشاط: {level_ar}.
+"""
+    return request_text
+
+# ══════════════════════════════════════════════════════════
+# دالة توليد الخطة
 # ═══════════════════════════════════════════════════════════
 def generate_trip_plan(user_request):
     prompt = f"""
@@ -82,11 +115,8 @@ def generate_trip_plan(user_request):
 }}
 """
     try:
-        # استدعاء API بالطريقة الصحيحة للمكتبة الجديدة
         response = client.models.generate_content(
-         
-            model="gemini-3.5-flash-lite"
-            ,
+            model="gemini-3.5-flash-lite",
             contents=prompt,
             config={
                 "response_mime_type": "application/json",
@@ -104,11 +134,34 @@ def generate_trip_plan(user_request):
 # ═══════════════════════════════════════════════════════════
 @app.route('/api/generate-trip', methods=['POST'])
 def api_generate_trip():
-    data = request.json
-    if not data or 'user_request' not in data:
-        return jsonify({"success": False, "message": "user_request مطلوب"}), 400
+    """
+    يستقبل خيارات منظمة من التطبيق ويبني منها خطة الرحلة
     
-    plan = generate_trip_plan(data['user_request'])
+    مثال على الطلب:
+    {
+        "cities": ["نابلس", "القدس"],
+        "number_of_days": 2,
+        "number_of_people": 2,
+        "budget": 100,
+        "interests": ["historical", "food"],
+        "start_date": "2026-10-15",
+        "activity_level": "moderate"
+    }
+    """
+    data = request.json
+    
+    if not data:
+        return jsonify({"success": False, "message": "البيانات مطلوبة"}), 400
+    
+    # التحقق من الحقول الأساسية
+    if 'cities' not in data or 'number_of_days' not in data:
+        return jsonify({"success": False, "message": "المدن وعدد الأيام مطلوبان"}), 400
+    
+    # بناء الجملة النصية من الخيارات
+    user_request = build_user_request_from_options(data)
+    
+    # توليد الخطة
+    plan = generate_trip_plan(user_request)
     
     if "error" in plan:
         return jsonify({"success": False, "message": plan["error"]}), 500
