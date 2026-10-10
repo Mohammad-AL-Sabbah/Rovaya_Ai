@@ -13,7 +13,7 @@ API_KEY = os.environ.get("GEMINI_API_KEY", "")
 client = genai.Client(api_key=API_KEY)
 
 # ═══════════════════════════════════════════════════════════
-# قراءة ملف CSV مباشرة (كما في Colab)
+# قراءة ملف CSV مباشرة
 # ═══════════════════════════════════════════════════════════
 try:
     df = pd.read_csv('palestine_tourism_data.csv')
@@ -40,7 +40,7 @@ def prepare_places_for_ai():
 places_context = prepare_places_for_ai()
 
 # ═══════════════════════════════════════════════════════════
-# دالة توليد الخطة (نفس الكود الناجح من Colab)
+# دالة توليد الخطة (نسخة نظيفة وصحيحة 100%)
 # ═══════════════════════════════════════════════════════════
 def generate_trip_plan(user_request):
     prompt = f"""
@@ -82,14 +82,20 @@ def generate_trip_plan(user_request):
 }}
 """
     try:
+        # استدعاء API بالطريقة الصحيحة للمكتبة الجديدة
         response = client.models.generate_content(
             model="gemini-1.5-flash",
             contents=prompt,
-            config={"response_mime_type": "application/json"}
+            config={
+                "response_mime_type": "application/json",
+                "temperature": 0.7
+            }
         )
         return json.loads(response.text)
     except Exception as e:
-        return {"error": str(e)}
+        error_msg = str(e)
+        print(f"❌ خطأ في توليد الخطة: {error_msg}")
+        return {"error": error_msg}
 
 # ═══════════════════════════════════════════════════════════
 # Endpoints
