@@ -1,9 +1,82 @@
-def generate_trip_plan(user_request):
-    """توليد خطة رحلة مع نظام Retry ونماذج بديلة"""
+import os
+import json
+import time
+import pandas as pd
+from google import genai
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+
+# ═══════════════════════════════════════════════════════════
+# 1. إعداد التطبيق (هذا السطر هو الأهم لحل خطأ Gunicorn)
+# ═══════════════════════════════════════════════════════════
+app = Flask(__name__)
+CORS(app)
+
+# إعداد Gemini API
+API_KEY = os.environ.get("GEMINI_API_KEY", "")
+client = genai.Client(api_key=API_KEY)
+
+# ═══════════════════════════════════════════════════════════
+# 2. قراءة ملف CSV
+# ═══════════════════════════════════════════════════════════
+try:
+    df = pd.read_csv('palestine_tourism_data.csv')
+    print(f"✅ تم تحميل {len(df)} مكان سياحي من CSV")
+except Exception as e:
+    print(f"❌ خطأ في قراءة CSV: {e}")
+    df = pd.DataFrame()
+
+def prepare_places_for_ai():
+    places_text = ""
+    for index, row in df.iterrows():
+        places_text += f"""
+--- مكان رقم {row['id']} ---
+الاسم: {row['name_ar']} ({row['name_en']})
+المنطقة: {row['region']}
+المدينة: {row['city']}
+التصنيفات: {row['categories']}
+الوصف: {row['description_ar']}
+التكلفة: {row['avg_cost_usd']}$
+المدة: {row['visit_duration_min']} دقيقة
+"""
+    return places_text
+
+places_context = prepare_places_for_ai()
+
+# ═══════════════════════════════════════════════════════════
+# 3. دالة بناء الجملة النصية من الخيارات
+# ═══════════════════════════════════════════════════════════
+def build_user_request_from_options(options):
+    cities = ", ".join(options.get('cities', []))
+    days = options.get('number_of_days', 1)
+    people = options.get('number_of_people', 1)
+    budget = options.get('budget', 100)
+    interests = ", ".join(options.get('interests', []))
+    start_date = options.get('start_date', '2026-10-15')
+    activity_level = options.get('activity_level', 'moderate')
     
+    level_map = {
+        'relaxed': 'هادئ مع فترات راحة طويلة',
+        'moderate': 'متوازن بين الزيارة والراحة',
+        'intensive': 'مكثف مع زيارة أكبر عدد من الأماكن'
+    }
+    level_ar = level_map.get(activity_level, 'متوازن')
+    
+    return f"""
+أريد رحلة لمدة {days} يوم في {cities}.
+عدد الأشخاص: {people} أشخاص.
+الميزانية الإجمالية: {budget} دولار.
+الاهتمامات: {interests}.
+تاريخ البدء: {start_date}.
+مستوى النشاط: {level_ar}.
+"""
+
+# ═══════════════════════════════════════════════════════════
+# 4. دالة توليد الخطة مع نظام Retry ذكي
+# ═══════════════════════════════════════════════════════════
+def generate_trip_plan(user_request):
     prompt = f"""
 أنت خبير سياحي فلسطيني محترف. بناء خطة رحلة واقعية بناءً على:
-
 طلب المستخدم: {user_request}
 
 الأماكن المتاحة فقط (استخدم هذه القائمة ولا تخترع أماكن):
@@ -40,13 +113,8 @@ def generate_trip_plan(user_request):
 }}
 """
     
-    # قائمة النماذج البديلة (بالترتيب)
-    models_to_try = [
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-flash-latest",
-        "gemini-pro-latest"
-    ]
+    # قائمة النماذج البديلة في حال كان أحدها تحت ضغط
+    models_to_try = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-pro-latest"]
     
     for model_name in models_to_try:
         try:
@@ -65,18 +133,44 @@ def generate_trip_plan(user_request):
             error_msg = str(e)
             print(f"❌ فشل مع {model_name}: {error_msg}")
             
-            # إذا كان الخطأ 404 (نموذج غير موجود)، انتقل للتالي مباشرة
             if "404" in error_msg or "NOT_FOUND" in error_msg:
-                continue
-            # إذا كان 503 (ضغط عالٍ)، انتظر 3 ثوانٍ وحاول مرة أخرى
+                continue # انتقل للنموذج التالي
             elif "503" in error_msg or "UNAVAILABLE" in error_msg:
                 print("⏳ انتظار 3 ثوانٍ قبل المحاولة التالية...")
-                import time
                 time.sleep(3)
                 continue
             else:
-                # خطأ آخر، ارجع الخطأ
                 return {"error": error_msg}
     
-    # إذا فشلت جميع المحاولات
     return {"error": "فشلت جميع المحاولات مع النماذج المتاحة"}
+
+# ═══════════════════════════════════════════════════════════
+# 5. مسارات الـ API (Endpoints)
+# ═══════════════════════════════════════════════════════════
+@app.route('/api/generate-trip', methods=['POST'])
+def api_generate_trip():
+    data = request.json
+    if not data:
+        return jsonify({"success": False, "message": "البيانات مطلوبة"}), 400
+    
+    if 'cities' not in data or 'number_of_days' not in data:
+        return jsonify({"success": False, "message": "المدن وعدد الأيام مطلوبان"}), 400
+    
+    user_request = build_user_request_from_options(data)
+    plan = generate_trip_plan(user_request)
+    
+    if "error" in plan:
+        return jsonify({"success": False, "message": plan["error"]}), 500
+    
+    return jsonify({"success": True, "plan": plan}), 200
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    return jsonify({"status": "healthy", "places_loaded": len(df)}), 200
+
+# ═══════════════════════════════════════════════════════════
+# 6. تشغيل التطبيق
+# ═══════════════════════════════════════════════════════════
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
