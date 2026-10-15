@@ -121,7 +121,14 @@ def generate_trip_plan(user_request):
     # نستخدم llama-3.3-70b-versatile لأنه الأفضل في العربية والـ JSON
    
         # أسماء النماذج الأضمن والمتاحة دائماً في الخطة المجانية من Groq
-    models_to_try = ["llama3-70b-8192", "llama3-8b-8192"]
+    
+  models_to_try = [
+        "llama-3.3-70b-versatile",  # الأقوى والأذكى، ممتاز جداً في العربية والـ JSON
+        "mixtral-8x7b-32768",       # البديل الأكثر استقراراً على الإطلاق (لا يتعطل أبداً)
+        "gemma2-9b-it"              # نموذج Google المستقر والممتاز في اتباع التعليمات
+    ]
+
+    
     
     for model_name in models_to_try:
         try:
