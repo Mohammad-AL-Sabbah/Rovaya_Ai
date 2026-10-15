@@ -2,22 +2,19 @@ import os
 import json
 import time
 import pandas as pd
-
-from groq import Groq  # <-- استيراد مكتبة 
+from groq import Groq
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 # ═══════════════════════════════════════════════════════════
-# 1. إعداد التطبيق (هذا السطر هو الأهم لحل خطأ Gunicorn)
+# 1. إعداد التطبيق
 # ═══════════════════════════════════════════════════════════
 app = Flask(__name__)
 CORS(app)
 
-# إعداد Gemini API
-
+# إعداد Groq API
 API_KEY = os.environ.get("GROQ_API_KEY", "")
 client = Groq(api_key=API_KEY)
-
 
 # ═══════════════════════════════════════════════════════════
 # 2. قراءة ملف CSV
@@ -116,19 +113,12 @@ def generate_trip_plan(user_request):
 }}
 """
     
-    # قائمة النماذج البديلة في حال كان أحدها تحت ضغط
-       # قائمة النماذج القوية والمجانية على Groq
-    # نستخدم llama-3.3-70b-versatile لأنه الأفضل في العربية والـ JSON
-   
-        # أسماء النماذج الأضمن والمتاحة دائماً في الخطة المجانية من Groq
-    
-  models_to_try = [
-        "llama-3.3-70b-versatile",  # الأقوى والأذكى، ممتاز جداً في العربية والـ JSON
-        "mixtral-8x7b-32768",       # البديل الأكثر استقراراً على الإطلاق (لا يتعطل أبداً)
-        "gemma2-9b-it"              # نموذج Google المستقر والممتاز في اتباع التعليمات
+    # قائمة النماذج النشطة والمدعومة رسمياً ومجانياً على Groq حالياً
+    models_to_try = [
+        "llama-3.3-70b-versatile",
+        "mixtral-8x7b-32768",
+        "gemma2-9b-it"
     ]
-
-    
     
     for model_name in models_to_try:
         try:
@@ -141,19 +131,26 @@ def generate_trip_plan(user_request):
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
-                response_format={"type": "json_object"}  # <-- هذا السطر يضمن إخراج JSON نظيف 100%
+                response_format={"type": "json_object"}
             )
             
             print(f"✅ نجح مع: {model_name}")
-            # استخراج النص وتحويله إلى قاموس Python
             return json.loads(completion.choices[0].message.content)
             
         except Exception as e:
             error_msg = str(e)
             print(f"❌ فشل مع {model_name}: {error_msg}")
-            # في Groq، الأخطاء نادرة، لكن إذا حدثت ننتقل للنموذج التالي
-            continue
             
+            # تجاهل أخطاء النماذج الملغاة أو غير الموجودة والمحاولة مع التالي
+            if "model_not_found" in error_msg or "decommissioned" in error_msg or "404" in error_msg:
+                continue
+            elif "503" in error_msg or "UNAVAILABLE" in error_msg:
+                print("⏳ انتظار 3 ثوانٍ قبل المحاولة التالية...")
+                time.sleep(3)
+                continue
+            else:
+                return {"error": error_msg}
+    
     return {"error": "فشلت جميع المحاولات مع نماذج Groq"}
 
 # ═══════════════════════════════════════════════════════════
