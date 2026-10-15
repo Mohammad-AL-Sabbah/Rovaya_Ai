@@ -1,8 +1,7 @@
 import os
 import json
-import time
 import pandas as pd
-from groq import Groq
+import google.generativeai as genai
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
@@ -12,9 +11,9 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-# إعداد Groq API
-API_KEY = os.environ.get("GROQ_API_KEY", "")
-client = Groq(api_key=API_KEY)
+# إعداد Gemini API
+API_KEY = os.environ.get("GEMINI_API_KEY", "")
+genai.configure(api_key=API_KEY)
 
 # ═══════════════════════════════════════════════════════════
 # 2. قراءة ملف CSV
@@ -29,22 +28,13 @@ except Exception as e:
 def prepare_places_for_ai():
     places_text = ""
     for index, row in df.iterrows():
-        places_text += f"""
---- مكان رقم {row['id']} ---
-الاسم: {row['name_ar']} ({row['name_en']})
-المنطقة: {row['region']}
-المدينة: {row['city']}
-التصنيفات: {row['categories']}
-الوصف: {row['description_ar']}
-التكلفة: {row['avg_cost_usd']}$
-المدة: {row['visit_duration_min']} دقيقة
-"""
+        places_text += f"مكان {row['id']}: {row['name_ar']} في {row['city']} ({row['region']}). التصنيف: {row['categories']}. الوصف: {row['description_ar']}. التكلفة: {row['avg_cost_usd']}$.\n"
     return places_text
 
 places_context = prepare_places_for_ai()
 
 # ═══════════════════════════════════════════════════════════
-# 3. دالة بناء الجملة النصية من الخيارات
+# 3. دالة بناء الجملة النصية
 # ═══════════════════════════════════════════════════════════
 def build_user_request_from_options(options):
     cities = ", ".join(options.get('cities', []))
@@ -53,45 +43,21 @@ def build_user_request_from_options(options):
     budget = options.get('budget', 100)
     interests = ", ".join(options.get('interests', []))
     start_date = options.get('start_date', '2026-10-15')
-    activity_level = options.get('activity_level', 'moderate')
     
-    level_map = {
-        'relaxed': 'هادئ مع فترات راحة طويلة',
-        'moderate': 'متوازن بين الزيارة والراحة',
-        'intensive': 'مكثف مع زيارة أكبر عدد من الأماكن'
-    }
-    level_ar = level_map.get(activity_level, 'متوازن')
-    
-    return f"""
-أريد رحلة لمدة {days} يوم في {cities}.
-عدد الأشخاص: {people} أشخاص.
-الميزانية الإجمالية: {budget} دولار.
-الاهتمامات: {interests}.
-تاريخ البدء: {start_date}.
-مستوى النشاط: {level_ar}.
-"""
+    return f"أريد رحلة لمدة {days} يوم في {cities}. عدد الأشخاص: {people}. الميزانية: {budget} دولار. الاهتمامات: {interests}. تاريخ البدء: {start_date}."
 
 # ═══════════════════════════════════════════════════════════
-# 4. دالة توليد الخطة مع نظام Retry ذكي
+# 4. دالة توليد الخطة (مبسطة ومضمونة)
 # ═══════════════════════════════════════════════════════════
 def generate_trip_plan(user_request):
     prompt = f"""
-أنت خبير سياحي فلسطيني محترف. بناء خطة رحلة واقعية بناءً على:
-طلب المستخدم: {user_request}
-
-الأماكن المتاحة فقط (استخدم هذه القائمة ولا تخترع أماكن):
-{places_context}
-
-قواعد صارمة:
-1. لا تخلط مناطق مختلفة في نفس اليوم (غزة مع الضفة).
-2. ابدأ من 09:00، اترك وقت للانتقال والغداء (13:00-14:30).
-3. التزم بالميزانية المحددة بدقة.
-4. أعد النتيجة بصيغة JSON فقط بدون أي نص قبلها أو بعدها.
-
+أنت خبير سياحي فلسطيني. بناء خطة رحلة واقعية بناءً على: {user_request}
+الأماكن المتاحة فقط: {places_context}
+قواعد: 1. لا تخلط مناطق مختلفة. 2. ابدأ من 09:00. 3. التزم بالميزانية. 4. أعد النتيجة بصيغة JSON فقط.
 هيكل JSON المطلوب:
 {{
-  "trip_title": "عنوان جذاب",
-  "summary": "ملخص قصير",
+  "trip_title": "عنوان",
+  "summary": "ملخص",
   "total_estimated_cost": 0,
   "days": [{{
     "day_number": 1,
@@ -106,65 +72,31 @@ def generate_trip_plan(user_request):
       "activity_type": "visit",
       "description": "وصف النشاط",
       "cost_per_person": 5,
-      "tips": "نصيحة مفيدة"
+      "tips": "نصيحة"
     }}],
     "daily_cost": 50
   }}]
 }}
 """
-    
-    # قائمة النماذج النشطة والمدعومة رسمياً ومجانياً على Groq حالياً
-    # قائمة النماذج النشطة والمجانية حالياً في Groq (محدثة)
-    models_to_try = [
-        "llama-3.1-8b-instant",       # الأسرع والأكثر استقراراً حالياً (موصى به)
-        "llama-3.1-70b-versatile",    # الأقوى والأذكى
-        "llama3-8b-8192"              # نسخة احتياطية كلاسيكية
-    ]
-    
-    for model_name in models_to_try:
-        try:
-            print(f"🔄 محاولة استخدام نموذج Groq: {model_name}")
-            
-            completion = client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": "أنت مساعد ذكي يجب أن ترد بصيغة JSON فقط دون أي نص إضافي."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
-                response_format={"type": "json_object"}
-            )
-            
-            print(f"✅ نجح مع: {model_name}")
-            return json.loads(completion.choices[0].message.content)
-            
-        except Exception as e:
-            error_msg = str(e)
-            print(f"❌ فشل مع {model_name}: {error_msg}")
-            
-            # تجاهل أخطاء النماذج الملغاة أو غير الموجودة والمحاولة مع التالي
-            if "model_not_found" in error_msg or "decommissioned" in error_msg or "404" in error_msg:
-                continue
-            elif "503" in error_msg or "UNAVAILABLE" in error_msg:
-                print("⏳ انتظار 3 ثوانٍ قبل المحاولة التالية...")
-                time.sleep(3)
-                continue
-            else:
-                return {"error": error_msg}
-    
-    return {"error": "فشلت جميع المحاولات مع نماذج Groq"}
+    try:
+        # استخدام نموذج واحد مستقر ومجاني بحدود عالية
+        model = genai.GenerativeModel(
+            'gemini-1.5-flash',
+            generation_config={"response_mime_type": "application/json"}
+        )
+        response = model.generate_content(prompt)
+        return json.loads(response.text)
+    except Exception as e:
+        return {"error": str(e)}
 
 # ═══════════════════════════════════════════════════════════
-# 5. مسارات الـ API (Endpoints)
+# 5. مسارات الـ API
 # ═══════════════════════════════════════════════════════════
 @app.route('/api/generate-trip', methods=['POST'])
 def api_generate_trip():
     data = request.json
-    if not data:
-        return jsonify({"success": False, "message": "البيانات مطلوبة"}), 400
-    
-    if 'cities' not in data or 'number_of_days' not in data:
-        return jsonify({"success": False, "message": "المدن وعدد الأيام مطلوبان"}), 400
+    if not data or 'cities' not in data or 'number_of_days' not in data:
+        return jsonify({"success": False, "message": "بيانات غير مكتملة"}), 400
     
     user_request = build_user_request_from_options(data)
     plan = generate_trip_plan(user_request)
@@ -178,9 +110,6 @@ def api_generate_trip():
 def health_check():
     return jsonify({"status": "healthy", "places_loaded": len(df)}), 200
 
-# ═══════════════════════════════════════════════════════════
-# 6. تشغيل التطبيق
-# ═══════════════════════════════════════════════════════════
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
