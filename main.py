@@ -2,7 +2,8 @@ import os
 import json
 import time
 import pandas as pd
-from google import genai
+
+from groq import Groq  # <-- استيراد مكتبة 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
@@ -13,8 +14,10 @@ app = Flask(__name__)
 CORS(app)
 
 # إعداد Gemini API
-API_KEY = os.environ.get("GEMINI_API_KEY", "")
-client = genai.Client(api_key=API_KEY)
+
+API_KEY = os.environ.get("GROQ_API_KEY", "")
+client = Groq(api_key=API_KEY)
+
 
 # ═══════════════════════════════════════════════════════════
 # 2. قراءة ملف CSV
@@ -114,35 +117,35 @@ def generate_trip_plan(user_request):
 """
     
     # قائمة النماذج البديلة في حال كان أحدها تحت ضغط
-    models_to_try = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-pro-latest"]
+       # قائمة النماذج القوية والمجانية على Groq
+    # نستخدم llama-3.3-70b-versatile لأنه الأفضل في العربية والـ JSON
+    models_to_try = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
     
     for model_name in models_to_try:
         try:
-            print(f"🔄 محاولة استخدام: {model_name}")
-            response = client.models.generate_content(
+            print(f"🔄 محاولة استخدام نموذج Groq: {model_name}")
+            
+            completion = client.chat.completions.create(
                 model=model_name,
-                contents=prompt,
-                config={
-                    "response_mime_type": "application/json",
-                    "temperature": 0.7
-                }
+                messages=[
+                    {"role": "system", "content": "أنت مساعد ذكي يجب أن ترد بصيغة JSON فقط دون أي نص إضافي."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                response_format={"type": "json_object"}  # <-- هذا السطر يضمن إخراج JSON نظيف 100%
             )
+            
             print(f"✅ نجح مع: {model_name}")
-            return json.loads(response.text)
+            # استخراج النص وتحويله إلى قاموس Python
+            return json.loads(completion.choices[0].message.content)
+            
         except Exception as e:
             error_msg = str(e)
             print(f"❌ فشل مع {model_name}: {error_msg}")
+            # في Groq، الأخطاء نادرة، لكن إذا حدثت ننتقل للنموذج التالي
+            continue
             
-            if "404" in error_msg or "NOT_FOUND" in error_msg:
-                continue # انتقل للنموذج التالي
-            elif "503" in error_msg or "UNAVAILABLE" in error_msg:
-                print("⏳ انتظار 3 ثوانٍ قبل المحاولة التالية...")
-                time.sleep(3)
-                continue
-            else:
-                return {"error": error_msg}
-    
-    return {"error": "فشلت جميع المحاولات مع النماذج المتاحة"}
+    return {"error": "فشلت جميع المحاولات مع نماذج Groq"}
 
 # ═══════════════════════════════════════════════════════════
 # 5. مسارات الـ API (Endpoints)
