@@ -114,10 +114,11 @@ def generate_trip_plan(user_request):
 """
     
     # قائمة النماذج النشطة والمدعومة رسمياً ومجانياً على Groq حالياً
+    # قائمة النماذج النشطة والمجانية حالياً في Groq (محدثة)
     models_to_try = [
-        "llama-3.3-70b-versatile",
-        "mixtral-8x7b-32768",
-        "gemma2-9b-it"
+        "llama-3.1-8b-instant",       # الأسرع والأكثر استقراراً حالياً (موصى به)
+        "llama-3.1-70b-versatile",    # الأقوى والأذكى
+        "llama3-8b-8192"              # نسخة احتياطية كلاسيكية
     ]
     
     for model_name in models_to_try:
