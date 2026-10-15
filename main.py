@@ -81,7 +81,10 @@ def generate_trip_plan(user_request):
     try:
         # استخدام نموذج واحد مستقر ومجاني بحدود عالية
         model = genai.GenerativeModel(
-            'gemini-1.5-flash',
+            'gemini-3.5-flash-lite'
+           
+            
+            ,
             generation_config={"response_mime_type": "application/json"}
         )
         response = model.generate_content(prompt)
