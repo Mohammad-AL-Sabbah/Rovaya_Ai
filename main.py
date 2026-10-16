@@ -113,6 +113,54 @@ def api_generate_trip():
 def health_check():
     return jsonify({"status": "healthy", "places_loaded": len(df)}), 200
 
+
+@app.route('/api/place-details', methods=['POST'])
+def api_place_details():
+    """توليد وصف تفصيلي لمكان معين"""
+    data = request.json
+    if not data or 'place_name' not in data:
+        return jsonify({"success": False, "message": "اسم المكان مطلوب"}), 400
+    
+    place_name = data['place_name']
+    
+    # البحث عن المكان في CSV
+    place_info = None
+    for index, row in df.iterrows():
+        if place_name in str(row['name_ar']) or place_name in str(row['name_en']):
+            place_info = row
+            break
+    
+    if place_info is None:
+        return jsonify({"success": False, "message": "المكان غير موجود في قاعدة البيانات"}), 404
+    
+    # بناء الـ Prompt
+    prompt = f"""أنت مرشد سياحي فلسطيني خبير. 
+اكتب وصفاً تاريخياً وثقافياً غنياً وممتعاً في 3 فقرات قصيرة عن المكان التالي:
+
+الاسم: {place_info['name_ar']} ({place_info['name_en']})
+المدينة: {place_info['city']}
+المنطقة: {place_info['region']}
+التصنيفات: {place_info['categories']}
+الوصف الأساسي: {place_info['description_ar']}
+
+اذكر معلومة غريبة أو مميزة عنه، وقدم نصيحة ذهبية للزوار.
+اكتب باللغة العربية بأسلوب جذاب وسلس.
+"""
+    
+    try:
+        response = client.models.generate_content(
+            model="gemini-3.5-flash-lite",
+            contents=prompt,
+            config={"response_mime_type": "text/plain"}
+        )
+        return jsonify({"success": True, "details": response.text})
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+
+
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
