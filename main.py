@@ -8,7 +8,7 @@ from flask_cors import CORS
 
 # ═══════════════════════════════════════════════════════════
 # 1. إعداد التطبيق
-# ══════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
 app = Flask(__name__)
 CORS(app)
 
@@ -34,7 +34,7 @@ def prepare_places_for_ai():
 
 places_context = prepare_places_for_ai()
 
-# ══════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
 # 3. دالة بناء الجملة النصية
 # ═══════════════════════════════════════════════════════════
 def build_user_request_from_options(options):
@@ -90,29 +90,53 @@ def generate_trip_plan(user_request):
         return {"error": str(e)}
 
 # ═══════════════════════════════════════════════════════════
-# 5. دالة جلب الصور من ويكيميديا (جديدة!)
+# 5. دالة جلب الصور من ويكيميديا (محدثة وذكية!)
 # ═══════════════════════════════════════════════════════════
-def get_wikimedia_image(place_name_en):
-    """جلب صورة ديناميكية من ويكيميديا بناءً على اسم المكان بالإنجليزية"""
+def get_wikimedia_image(place_name_en, city_name=""):
+    """جلب صورة ديناميكية من ويكيميديا باستخدام بحث ذكي متعدد الصيغ"""
     try:
-        # تنظيف الاسم ليتناسب مع بحث ويكيميديا
-        search_term = place_name_en.replace(" ", "_")
+        # تحضير كلمات البحث المختلفة لزيادة فرص العثور على صورة
+        search_terms = [
+            f"{place_name_en}",
+            f"{place_name_en}, {city_name}",
+            f"Tel {place_name_en}",
+            f"{place_name_en} archaeological site"
+        ]
         
-        # البحث عن الصفحة في ويكيميديا كومنز
-        url = f"https://commons.wikimedia.org/w/api.php?action=query&titles={search_term}&prop=pageimages&format=json&pithumbsize=800"
-        
-        req = urllib.request.Request(url, headers={'User-Agent': 'RovayaApp/1.0'})
-        with urllib.request.urlopen(req, timeout=5) as response:
-            data = json.loads(response.read().decode())
-            
-            pages = data['query']['pages']
-            for page_id in pages:
-                if 'thumbnail' in pages[page_id]:
-                    return pages[page_id]['thumbnail']['source']
+        for search_term in search_terms:
+            try:
+                # تنظيف الاسم ليتناسب مع روابط الويب
+                clean_term = search_term.replace(" ", "_")
+                
+                # استخدام API البحث في ويكيميديا كومنز (namespace=6 يعني البحث في الملفات/الصور فقط)
+                url = f"https://commons.wikimedia.org/w/api.php?action=query&list=search&srsearch={clean_term}&srnamespace=6&srprop=size&srwhat=text&format=json&srlimit=1"
+                
+                req = urllib.request.Request(url, headers={'User-Agent': 'RovayaApp/1.0'})
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    data = json.loads(response.read().decode())
                     
+                    if data.get('query') and data['query'].get('search'):
+                        # الحصول على عنوان الصفحة التي تحتوي على الصورة
+                        title = data['query']['search'][0]['title']
+                        
+                        # الآن جلب الصورة الفعلية من عنوان الصفحة
+                        img_url = f"https://commons.wikimedia.org/w/api.php?action=query&titles={title}&prop=pageimages&format=json&pithumbsize=800"
+                        
+                        req2 = urllib.request.Request(img_url, headers={'User-Agent': 'RovayaApp/1.0'})
+                        with urllib.request.urlopen(req2, timeout=5) as response2:
+                            data2 = json.loads(response2.read().decode())
+                            pages = data2['query']['pages']
+                            for page_id in pages:
+                                if 'thumbnail' in pages[page_id]:
+                                    print(f"✅ تم العثور على صورة لـ '{search_term}': {pages[page_id]['thumbnail']['source']}")
+                                    return pages[page_id]['thumbnail']['source']
+            except Exception as e:
+                # إذا فشل بحث واحد، ينتقل للتجربة التالية تلقائياً
+                continue
+        
         return None
     except Exception as e:
-        print(f"❌ خطأ في جلب الصورة من ويكيميديا: {e}")
+        print(f"❌ خطأ عام في جلب الصورة من ويكيميديا: {e}")
         return None
 
 # ═══════════════════════════════════════════════════════════
@@ -175,9 +199,9 @@ def api_place_details():
         response = model.generate_content(prompt)
         description_text = response.text
         
-        # 2. جلب الصورة ديناميكياً من ويكيميديا
-        print(f"🖼️ جاري البحث عن صورة لـ: {place_info['name_en']}")
-        image_url = get_wikimedia_image(place_info['name_en'])
+        # 2. جلب الصورة ديناميكياً من ويكيميديا (مع تمرير اسم المدينة لتحسين البحث)
+        print(f"🖼️ جاري البحث عن صورة لـ: {place_info['name_en']} في {place_info['city']}")
+        image_url = get_wikimedia_image(place_info['name_en'], place_info['city'])
         
         if image_url:
             print(f"✅ تم العثور على صورة: {image_url}")
