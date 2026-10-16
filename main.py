@@ -1,7 +1,7 @@
 import os
 import json
 import pandas as pd
-import google.generativeai as genai
+from google import genai
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
@@ -11,9 +11,9 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-# إعداد Gemini API
+# إعداد Gemini API باستخدام المكتبة الجديدة
 API_KEY = os.environ.get("GEMINI_API_KEY", "")
-genai.configure(api_key=API_KEY)
+client = genai.Client(api_key=API_KEY)
 
 # ═══════════════════════════════════════════════════════════
 # 2. قراءة ملف CSV
@@ -28,7 +28,7 @@ except Exception as e:
 def prepare_places_for_ai():
     places_text = ""
     for index, row in df.iterrows():
-        places_text += f"مكان {row['id']}: {row['name_ar']} في {row['city']} ({row['region']}). التصنيف: {row['categories']}. الوصف: {row['description_ar']}. التكلفة: {row['avg_cost_usd']}$.\n"
+        places_text += f"مكان {row['id']}: {row['name_ar']} في {row['city']} ({row['region']}). التصنيف: {row['categories']}. الوصف: {row['description_ar']}. التكلفة: {row['avg_cost_usd']}$. المدة: {row['visit_duration_min']} دقيقة.\n"
     return places_text
 
 places_context = prepare_places_for_ai()
@@ -47,7 +47,7 @@ def build_user_request_from_options(options):
     return f"أريد رحلة لمدة {days} يوم في {cities}. عدد الأشخاص: {people}. الميزانية: {budget} دولار. الاهتمامات: {interests}. تاريخ البدء: {start_date}."
 
 # ═══════════════════════════════════════════════════════════
-# 4. دالة توليد الخطة (مبسطة ومضمونة)
+# 4. دالة توليد الخطة (باستخدام المكتبة الجديدة)
 # ═══════════════════════════════════════════════════════════
 def generate_trip_plan(user_request):
     prompt = f"""
@@ -79,15 +79,11 @@ def generate_trip_plan(user_request):
 }}
 """
     try:
-        # استخدام نموذج واحد مستقر ومجاني بحدود عالية
-        model = genai.GenerativeModel(
-            'gemini-3.5-flash-lite'
-           
-            
-            ,
-            generation_config={"response_mime_type": "application/json"}
+        response = client.models.generate_content(
+            model="gemini-3.5-flash-lite",
+            contents=prompt,
+            config={"response_mime_type": "application/json"}
         )
-        response = model.generate_content(prompt)
         return json.loads(response.text)
     except Exception as e:
         return {"error": str(e)}
@@ -112,7 +108,6 @@ def api_generate_trip():
 @app.route('/api/health', methods=['GET'])
 def health_check():
     return jsonify({"status": "healthy", "places_loaded": len(df)}), 200
-
 
 @app.route('/api/place-details', methods=['POST'])
 def api_place_details():
@@ -156,10 +151,6 @@ def api_place_details():
         return jsonify({"success": True, "details": response.text})
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
-
-
-
-
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
