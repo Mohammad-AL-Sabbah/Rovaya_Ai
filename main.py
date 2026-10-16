@@ -1,5 +1,6 @@
 import os
 import json
+import urllib.request
 import pandas as pd
 import google.generativeai as genai
 from flask import Flask, request, jsonify
@@ -7,11 +8,11 @@ from flask_cors import CORS
 
 # ═══════════════════════════════════════════════════════════
 # 1. إعداد التطبيق
-# ═══════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════
 app = Flask(__name__)
 CORS(app)
 
-# إعداد Gemini API (باستخدام المكتبة القديمة المستقرة)
+# إعداد Gemini API
 API_KEY = os.environ.get("GEMINI_API_KEY", "")
 genai.configure(api_key=API_KEY)
 
@@ -33,7 +34,7 @@ def prepare_places_for_ai():
 
 places_context = prepare_places_for_ai()
 
-# ═══════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════
 # 3. دالة بناء الجملة النصية
 # ═══════════════════════════════════════════════════════════
 def build_user_request_from_options(options):
@@ -89,7 +90,33 @@ def generate_trip_plan(user_request):
         return {"error": str(e)}
 
 # ═══════════════════════════════════════════════════════════
-# 5. مسارات الـ API
+# 5. دالة جلب الصور من ويكيميديا (جديدة!)
+# ═══════════════════════════════════════════════════════════
+def get_wikimedia_image(place_name_en):
+    """جلب صورة ديناميكية من ويكيميديا بناءً على اسم المكان بالإنجليزية"""
+    try:
+        # تنظيف الاسم ليتناسب مع بحث ويكيميديا
+        search_term = place_name_en.replace(" ", "_")
+        
+        # البحث عن الصفحة في ويكيميديا كومنز
+        url = f"https://commons.wikimedia.org/w/api.php?action=query&titles={search_term}&prop=pageimages&format=json&pithumbsize=800"
+        
+        req = urllib.request.Request(url, headers={'User-Agent': 'RovayaApp/1.0'})
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.loads(response.read().decode())
+            
+            pages = data['query']['pages']
+            for page_id in pages:
+                if 'thumbnail' in pages[page_id]:
+                    return pages[page_id]['thumbnail']['source']
+                    
+        return None
+    except Exception as e:
+        print(f"❌ خطأ في جلب الصورة من ويكيميديا: {e}")
+        return None
+
+# ═══════════════════════════════════════════════════════════
+# 6. مسارات الـ API
 # ═══════════════════════════════════════════════════════════
 @app.route('/api/generate-trip', methods=['POST'])
 def api_generate_trip():
@@ -111,7 +138,7 @@ def health_check():
 
 @app.route('/api/place-details', methods=['POST'])
 def api_place_details():
-    """توليد وصف تفصيلي لمكان معين"""
+    """توليد وصف تفصيلي لمكان معين مع صورة ديناميكية"""
     data = request.json
     if not data or 'place_name' not in data:
         return jsonify({"success": False, "message": "اسم المكان مطلوب"}), 400
@@ -143,10 +170,30 @@ def api_place_details():
 """
     
     try:
-        # ✅ استخدام نفس المكتبة القديمة هنا لتجنب أي أخطاء
+        # 1. توليد النص بالذكاء الاصطناعي
         model = genai.GenerativeModel('gemini-3.5-flash-lite')
         response = model.generate_content(prompt)
-        return jsonify({"success": True, "details": response.text})
+        description_text = response.text
+        
+        # 2. جلب الصورة ديناميكياً من ويكيميديا
+        print(f"🖼️ جاري البحث عن صورة لـ: {place_info['name_en']}")
+        image_url = get_wikimedia_image(place_info['name_en'])
+        
+        if image_url:
+            print(f"✅ تم العثور على صورة: {image_url}")
+        else:
+            print(f"⚠️ لم يتم العثور على صورة، سيتم استخدام صورة بديلة")
+            image_url = "https://via.placeholder.com/800x400?text=No+Image+Available"
+        
+        # 3. إرجاع النص والصورة معاً
+        return jsonify({
+            "success": True, 
+            "details": description_text,
+            "image_url": image_url,
+            "place_name_ar": place_info['name_ar'],
+            "place_name_en": place_info['name_en'],
+            "city": place_info['city']
+        })
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
 
