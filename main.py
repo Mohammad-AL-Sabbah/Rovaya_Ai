@@ -458,6 +458,13 @@ def api_generate_trip():
     return jsonify({"success": True, "plan": plan}), 200
 
 
+
+
+
+
+
+
+
 @app.route("/api/health", methods=["GET"])
 def health_check():
     return jsonify({
@@ -465,6 +472,84 @@ def health_check():
         "places_loaded": int(len(df)),
         "gemini_api_key_configured": bool(API_KEY),
     }), 200
+
+
+
+@app.route("/api/modify-trip", methods=["POST"])
+def api_modify_trip():
+    """تعديل خطة رحلة موجودة بناءً على طلب المستخدم"""
+    
+    data = request.get_json(silent=True)
+    
+    if not isinstance(data, dict):
+        return jsonify({"success": False, "message": "يجب إرسال JSON."}), 400
+    
+    # التحقق من وجود الخطة الحالية وطلب التعديل
+    if "current_plan" not in data or "modification_request" not in data:
+        return jsonify({
+            "success": False, 
+            "message": "الخطة الحالية وطلب التعديل مطلوبان."
+        }), 400
+    
+    current_plan = data["current_plan"]
+    modification_request = data["modification_request"]
+    
+    if not API_KEY:
+        return jsonify({"success": False, "message": "مفتاح Gemini غير مضبوط."}), 500
+    
+    # بناء Prompt للتعديل
+    prompt = f"""
+أنت خبير سياحي فلسطيني محترف.
+
+لديك خطة رحلة حالية بصيغة JSON:
+{json.dumps(current_plan, ensure_ascii=False, indent=2)}
+
+المستخدم يطلب هذا التعديل:
+"{modification_request}"
+
+قواعد التعديل:
+1. طبق التعديل المطلوب بدقة.
+2. حافظ على هيكل JSON الأصلي (نفس الحقول والترتيب).
+3. أعد حساب التكاليف والأوقات إذا لزم الأمر.
+4. لا تغير الأجزاء التي لم يطلب المستخدم تعديلها.
+5. أعد JSON صالحًا فقط، دون Markdown أو شرح.
+
+أعد الخطة المعدلة كاملة بصيغة JSON.
+"""
+    
+    try:
+        model = genai.GenerativeModel(
+            "gemini-3.5-flash-lite",
+            generation_config={"response_mime_type": "application/json", "temperature": 0.3}
+        )
+        response = model.generate_content(prompt)
+        
+        if not getattr(response, "text", None):
+            return jsonify({"success": False, "message": "أعاد Gemini استجابة فارغة."}), 500
+        
+        modified_plan = json.loads(response.text)
+        
+        return jsonify({
+            "success": True,
+            "plan": modified_plan,
+            "message": "تم تعديل الخطة بنجاح."
+        }), 200
+        
+    except json.JSONDecodeError as e:
+        print(f"❌ Gemini أعاد JSON غير صالح: {e}")
+        return jsonify({"success": False, "message": "تعذر قراءة الاستجابة."}), 500
+    except Exception as e:
+        print(f"❌ خطأ في تعديل الخطة: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+
+
+
+
+
+
+
 
 
 @app.route("/api/place-details", methods=["POST"])
