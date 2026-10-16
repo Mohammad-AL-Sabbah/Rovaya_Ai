@@ -18,7 +18,7 @@ API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 if API_KEY:
     genai.configure(api_key=API_KEY)
 else:
-    print("️ تحذير: متغير البيئة GEMINI_API_KEY غير مضبوط.")
+    print("⚠️ تحذير: متغير البيئة GEMINI_API_KEY غير مضبوط.")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -90,7 +90,7 @@ places_context = prepare_places_for_ai()
 
 # ═══════════════════════════════════════════════════════════
 # 3. بناء طلب المستخدم
-# ═══════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════
 def build_user_request_from_options(options):
     cities_value = options.get("cities", [])
     interests_value = options.get("interests", [])
@@ -202,190 +202,232 @@ def generate_trip_plan(user_request):
 
 
 # ═══════════════════════════════════════════════════════════
-# 5. جلب صور متعددة من Wikimedia Commons و Wikipedia
+# 5. جلب صور دقيقة ومخصصة لكل مكان (5 صور على الأقل)
 # ═══════════════════════════════════════════════════════════
 def get_place_images(place_name_en, city_name="", region_name=""):
     """
-    جلب 5 صور على الأقل للمكان من Wikimedia Commons و Wikipedia
-    يركز على الصور المحددة للمكان وليس صور عشوائية
+    جلب 5 صور دقيقة للمكان من Wikimedia Commons و Wikipedia
+    مع التأكد من أن الصور تخص المكان المطلوب تحديداً
     """
     if not place_name_en:
         return []
 
     place_name_en = str(place_name_en).strip()
     city_name = str(city_name or "").strip()
-    region_name = str(region_name or "").strip()
-
+    
     all_images = []
     headers = {
         "User-Agent": "ROVAYA-Tourism-App/1.0 (tourism application)"
     }
 
-    # ══════════════════════════════════════════════════════
-    # الطريقة 1: جلب الصور من صفحة Wikipedia (الأكثر دقة)
     # ═══════════════════════════════════════════════════════
-    search_titles = [
-        f"Sebastia, Nablus",
-        f"Sebastia",
-        f"{place_name_en}, Palestine",
-        f"{place_name_en}, {city_name}" if city_name else f"{place_name_en}",
-    ]
-
-    for title in search_titles:
-        if len(all_images) >= 5:
-            break
-            
-        try:
-            wiki_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(title)}"
-            req = urllib.request.Request(wiki_url, headers=headers)
-            
-            with urllib.request.urlopen(req, timeout=10) as response:
-                data = json.loads(response.read().decode("utf-8"))
-                
-                # الصورة الرئيسية من Wikipedia
-                thumbnail = data.get("thumbnail")
-                if thumbnail and thumbnail.get("source"):
-                    image_url = thumbnail["source"]
-                    if image_url.startswith("http://"):
-                        image_url = image_url.replace("http://", "https://", 1)
-                    
-                    if image_url not in all_images:
-                        all_images.append(image_url)
-                        print(f"✅ صورة رئيسية من Wikipedia: {image_url}")
-                
-                # جلب صور إضافية من صفحة Wikipedia
-                page_title = data.get("title", "").replace(" ", "_")
-                if page_title:
-                    # الحصول على جميع الصور من المقالة
-                    images_url = f"https://en.wikipedia.org/w/api.php?action=parse&page={page_title}&prop=images&format=json"
-                    req2 = urllib.request.Request(images_url, headers=headers)
-                    
-                    with urllib.request.urlopen(req2, timeout=10) as response2:
-                        images_data = json.loads(response2.read().decode("utf-8"))
-                        
-                        image_titles = images_data.get("parse", {}).get("images", [])
-                        
-                        # جلب معلومات كل صورة
-                        for img_title in image_titles[:15]:  # نفحص أول 15 صورة
-                            if len(all_images) >= 5:
-                                break
-                                
-                            try:
-                                img_info_url = (
-                                    "https://commons.wikimedia.org/w/api.php?"
-                                    + urllib.parse.urlencode({
-                                        "action": "query",
-                                        "titles": f"File:{img_title}",
-                                        "prop": "imageinfo",
-                                        "iiprop": "url|extmetadata",
-                                        "iiurlwidth": 800,
-                                        "format": "json",
-                                    })
-                                )
-                                
-                                req3 = urllib.request.Request(img_info_url, headers=headers)
-                                
-                                with urllib.request.urlopen(req3, timeout=8) as response3:
-                                    img_data = json.loads(response3.read().decode("utf-8"))
-                                    
-                                    pages = img_data.get("query", {}).get("pages", {})
-                                    for page in pages.values():
-                                        imageinfo = page.get("imageinfo", [])
-                                        if imageinfo:
-                                            img_url = imageinfo[0].get("url")
-                                            if img_url and img_url.startswith("https://"):
-                                                if img_url not in all_images:
-                                                    all_images.append(img_url)
-                                                    print(f"✅ صورة إضافية من Wikipedia: {img_title}")
-                                                    
-                                                    if len(all_images) >= 5:
-                                                        return all_images
-                                                        
-                            except Exception as e:
-                                continue
-                                
-        except Exception as e:
-            continue
-
-    # ══════════════════════════════════════════════════════
-    # الطريقة 2: البحث المباشر في Wikimedia Commons
+    # قاموس الأماكن الفلسطينية الشهيرة مع عناوين Wikipedia الدقيقة
     # ═══════════════════════════════════════════════════════
-    search_queries = [
-        f'"{place_name_en}" "{city_name}" Palestine',
-        f'"{place_name_en}" archaeological site',
-        f'"{place_name_en}" ruins',
-        f'"{place_name_en}" heritage',
-    ]
+    wikipedia_titles_map = {
+        "Sebastia": "Sebastia, Nablus",
+        "Mount of Olives": "Mount of Olives",
+        "Al-Mukhtar Mountain": "Mount of Olives",  # جبل المكبر جزء من جبل الزيتون
+        "Jerusalem": "Jerusalem",
+        "Nablus": "Nablus",
+        "Bethlehem": "Bethlehem",
+        "Hebron": "Hebron",
+        "Jericho": "Jericho",
+        "Nazareth": "Nazareth",
+        "Acre": "Acre, Israel",
+        "Haifa": "Haifa",
+        "Jaffa": "Jaffa",
+        "Ramallah": "Ramallah",
+        "Gaza": "Gaza City",
+    }
 
-    for query in search_queries:
-        if len(all_images) >= 5:
-            break
+    # ═══════════════════════════════════════════════════════
+    # الطريقة 1: البحث في Wikipedia باستخدام العنوان الدقيق
+    # ═══════════════════════════════════════════════════════
+    wiki_title = wikipedia_titles_map.get(place_name_en, f"{place_name_en}, {city_name}" if city_name else place_name_en)
+    
+    try:
+        print(f"🔍 البحث في Wikipedia عن: {wiki_title}")
+        wiki_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(wiki_title)}"
+        req = urllib.request.Request(wiki_url, headers=headers)
+        
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read().decode("utf-8"))
             
+            # الصورة الرئيسية من Wikipedia
+            thumbnail = data.get("thumbnail")
+            if thumbnail and thumbnail.get("source"):
+                image_url = thumbnail["source"]
+                if image_url.startswith("http://"):
+                    image_url = image_url.replace("http://", "https://", 1)
+                
+                if image_url not in all_images:
+                    all_images.append(image_url)
+                    print(f"✅ الصورة الرئيسية: {image_url}")
+            
+            # جلب جميع الصور من المقالة
+            page_title = data.get("title", "").replace(" ", "_")
+            if page_title:
+                images_url = f"https://en.wikipedia.org/w/api.php?action=parse&page={page_title}&prop=images&format=json"
+                req2 = urllib.request.Request(images_url, headers=headers)
+                
+                with urllib.request.urlopen(req2, timeout=10) as response2:
+                    images_data = json.loads(response2.read().decode("utf-8"))
+                    
+                    image_titles = images_data.get("parse", {}).get("images", [])
+                    
+                    # جلب أول 10 صور من المقالة
+                    for img_title in image_titles[:10]:
+                        if len(all_images) >= 5:
+                            break
+                            
+                        try:
+                            img_info_url = (
+                                "https://commons.wikimedia.org/w/api.php?"
+                                + urllib.parse.urlencode({
+                                    "action": "query",
+                                    "titles": f"File:{img_title}",
+                                    "prop": "imageinfo",
+                                    "iiprop": "url",
+                                    "iiurlwidth": 800,
+                                    "format": "json",
+                                })
+                            )
+                            
+                            req3 = urllib.request.Request(img_info_url, headers=headers)
+                            
+                            with urllib.request.urlopen(req3, timeout=8) as response3:
+                                img_data = json.loads(response3.read().decode("utf-8"))
+                                
+                                pages = img_data.get("query", {}).get("pages", {})
+                                for page in pages.values():
+                                    imageinfo = page.get("imageinfo", [])
+                                    if imageinfo:
+                                        img_url = imageinfo[0].get("url")
+                                        if img_url and img_url.startswith("https://"):
+                                            if img_url not in all_images:
+                                                all_images.append(img_url)
+                                                print(f"✅ صورة من المقالة: {img_title}")
+                                                
+                        except Exception as e:
+                            continue
+                            
+    except Exception as e:
+        print(f"️ لم يتم العثور على صفحة Wikipedia: {e}")
+
+    # ═══════════════════════════════════════════════════════
+    # الطريقة 2: البحث في Wikimedia Commons بصيغ محددة جداً
+    # ═══════════════════════════════════════════════════════
+    if len(all_images) < 5:
+        search_queries = []
+        
+        # بناء صيغ بحث دقيقة
+        if city_name:
+            search_queries.extend([
+                f'"{place_name_en}" "{city_name}"',
+                f'"{place_name_en}" {city_name} Palestine',
+                f'{place_name_en} {city_name}',
+            ])
+        
+        search_queries.extend([
+            f'"{place_name_en}" Palestine',
+            f'{place_name_en} archaeological',
+            f'{place_name_en} heritage',
+        ])
+
+        for query in search_queries:
+            if len(all_images) >= 5:
+                break
+                
+            try:
+                search_url = (
+                    "https://commons.wikimedia.org/w/api.php?"
+                    + urllib.parse.urlencode({
+                        "action": "query",
+                        "list": "search",
+                        "srsearch": query,
+                        "srnamespace": 6,  # Namespace للصور فقط
+                        "srlimit": 10,
+                        "format": "json",
+                    })
+                )
+                
+                req = urllib.request.Request(search_url, headers=headers)
+                
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    data = json.loads(response.read().decode("utf-8"))
+                    
+                    results = data.get("query", {}).get("search", [])
+                    
+                    for result in results:
+                        if len(all_images) >= 5:
+                            break
+                            
+                        title = result.get("title", "")
+                        
+                        # تخطي ملفات SVG
+                        if title.lower().endswith(".svg"):
+                            continue
+                        
+                        # جلب معلومات الصورة
+                        img_info_url = (
+                            "https://commons.wikimedia.org/w/api.php?"
+                            + urllib.parse.urlencode({
+                                "action": "query",
+                                "titles": title,
+                                "prop": "imageinfo",
+                                "iiprop": "url",
+                                "iiurlwidth": 800,
+                                "format": "json",
+                            })
+                        )
+                        
+                        req2 = urllib.request.Request(img_info_url, headers=headers)
+                        
+                        with urllib.request.urlopen(req2, timeout=8) as response2:
+                            img_data = json.loads(response2.read().decode("utf-8"))
+                            
+                            pages = img_data.get("query", {}).get("pages", {})
+                            for page in pages.values():
+                                imageinfo = page.get("imageinfo", [])
+                                if imageinfo:
+                                    img_url = imageinfo[0].get("url")
+                                    if img_url and img_url.startswith("https://"):
+                                        if img_url not in all_images:
+                                            all_images.append(img_url)
+                                            print(f"✅ صورة من Commons: {title}")
+                                            
+            except Exception as e:
+                print(f"⚠️ خطأ في البحث عن '{query}': {e}")
+                continue
+
+    # ═══════════════════════════════════════════════════════
+    # الطريقة 3: صور بديلة من Unsplash (إذا لزم الأمر)
+    # ═══════════════════════════════════════════════════════
+    if len(all_images) < 5:
         try:
-            search_url = (
-                "https://commons.wikimedia.org/w/api.php?"
-                + urllib.parse.urlencode({
-                    "action": "query",
-                    "list": "search",
-                    "srsearch": query,
-                    "srnamespace": 6,  # Namespace للصور فقط
-                    "srlimit": 10,
-                    "srprop": "title",
-                    "format": "json",
-                })
-            )
+            # استخدام Unsplash Source API (مجاني ولا يحتاج مفتاح)
+            unsplash_query = f"{place_name_en} {city_name} Palestine".strip()
+            unsplash_url = f"https://source.unsplash.com/800x600/?{urllib.parse.quote(unsplash_query)}"
             
-            req = urllib.request.Request(search_url, headers=headers)
+            # Unsplash يعيد redirect للصورة، نحتاج لجلب الرابط النهائي
+            req = urllib.request.Request(unsplash_url)
+            req.get_method = lambda: 'HEAD'
             
-            with urllib.request.urlopen(req, timeout=10) as response:
-                data = json.loads(response.read().decode("utf-8"))
+            try:
+                response = urllib.request.urlopen(req, timeout=5)
+                final_url = response.geturl()
                 
-                results = data.get("query", {}).get("search", [])
+                if final_url and "unsplash" in final_url and final_url not in all_images:
+                    all_images.append(final_url)
+                    print(f"✅ صورة من Unsplash: {final_url}")
+            except:
+                pass  # Unsplash قد لا يجد صوراً
                 
-                for result in results:
-                    if len(all_images) >= 5:
-                        break
-                        
-                    title = result.get("title", "")
-                    
-                    # تخطي ملفات SVG
-                    if title.lower().endswith(".svg"):
-                        continue
-                    
-                    # جلب معلومات الصورة
-                    img_info_url = (
-                        "https://commons.wikimedia.org/w/api.php?"
-                        + urllib.parse.urlencode({
-                            "action": "query",
-                            "titles": title,
-                            "prop": "imageinfo",
-                            "iiprop": "url",
-                            "iiurlwidth": 800,
-                            "format": "json",
-                        })
-                    )
-                    
-                    req2 = urllib.request.Request(img_info_url, headers=headers)
-                    
-                    with urllib.request.urlopen(req2, timeout=8) as response2:
-                        img_data = json.loads(response2.read().decode("utf-8"))
-                        
-                        pages = img_data.get("query", {}).get("pages", {})
-                        for page in pages.values():
-                            imageinfo = page.get("imageinfo", [])
-                            if imageinfo:
-                                img_url = imageinfo[0].get("url")
-                                if img_url and img_url.startswith("https://"):
-                                    if img_url not in all_images:
-                                        all_images.append(img_url)
-                                        print(f"✅ صورة من Commons: {title}")
-                                        
         except Exception as e:
-            print(f"⚠️ خطأ في البحث عن '{query}': {e}")
-            continue
+            print(f"⚠️ خطأ في جلب صور Unsplash: {e}")
 
     if len(all_images) < 5:
-        print(f"⚠️ تم العثور على {len(all_images)} صور فقط (أقل من 5)")
+        print(f"⚠️ تم العثور على {len(all_images)} صور فقط")
     
     return all_images[:10]  # نرجع maximum 10 صور
 
@@ -441,7 +483,7 @@ def health_check():
 
 @app.route("/api/place-details", methods=["POST"])
 def api_place_details():
-    """إرجاع وصف تفصيلي للمكان مع 5 صور على الأقل."""
+    """إرجاع وصف تفصيلي للمكان مع 5 صور دقيقة."""
 
     data = request.get_json(silent=True)
 
@@ -529,8 +571,8 @@ def api_place_details():
             "message": f"تعذر توليد وصف المكان: {str(e)}"
         }), 500
 
-    # جلب صور متعددة (5 على الأقل)
-    print(f"🖼️ جاري البحث عن صور لـ {name_en} في {city}")
+    # جلب صور دقيقة (5 على الأقل)
+    print(f"🖼️ جاري البحث عن صور دقيقة لـ {name_en} في {city}")
     images = get_place_images(name_en, city, region)
 
     # الصورة الرئيسية هي أول صورة في القائمة
@@ -539,8 +581,8 @@ def api_place_details():
     return jsonify({
         "success": True,
         "details": description_text,
-        "images": images,  # ✅ قائمة صور (5 على الأقل)
-        "image_url": main_image,  # ✅ الصورة الرئيسية (للتوافق مع الـ DTO القديم)
+        "images": images,  # ✅ قائمة صور دقيقة
+        "image_url": main_image,  # ✅ الصورة الرئيسية
         "image_count": len(images),  # ✅ عدد الصور
         "place_name_ar": name_ar,
         "place_name_en": name_en,
