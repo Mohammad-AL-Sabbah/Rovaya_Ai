@@ -18,7 +18,7 @@ API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 if API_KEY:
     genai.configure(api_key=API_KEY)
 else:
-    print("⚠️ تحذير: متغير البيئة GEMINI_API_KEY غير مضبوط.")
+    print("️ تحذير: متغير البيئة GEMINI_API_KEY غير مضبوط.")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -202,7 +202,7 @@ def generate_trip_plan(user_request):
 
 
 # ═══════════════════════════════════════════════════════════
-# 5. جلب صور متعددة من Wikimedia Commons (5 صور على الأقل)
+# 5. جلب صور متعددة من Wikimedia Commons و Wikipedia
 # ═══════════════════════════════════════════════════════════
 def get_place_images(place_name_en, city_name="", region_name=""):
     """
@@ -232,6 +232,9 @@ def get_place_images(place_name_en, city_name="", region_name=""):
     ]
 
     for title in search_titles:
+        if len(all_images) >= 5:
+            break
+            
         try:
             wiki_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(title)}"
             req = urllib.request.Request(wiki_url, headers=headers)
@@ -248,11 +251,9 @@ def get_place_images(place_name_en, city_name="", region_name=""):
                     
                     if image_url not in all_images:
                         all_images.append(image_url)
-                        print(f"✅ صورة من Wikipedia: {image_url}")
+                        print(f"✅ صورة رئيسية من Wikipedia: {image_url}")
                 
-                # ═══════════════════════════════════════════
                 # جلب صور إضافية من صفحة Wikipedia
-                # ═══════════════════════════════════════════
                 page_title = data.get("title", "").replace(" ", "_")
                 if page_title:
                     # الحصول على جميع الصور من المقالة
@@ -266,6 +267,9 @@ def get_place_images(place_name_en, city_name="", region_name=""):
                         
                         # جلب معلومات كل صورة
                         for img_title in image_titles[:15]:  # نفحص أول 15 صورة
+                            if len(all_images) >= 5:
+                                break
+                                
                             try:
                                 img_info_url = (
                                     "https://commons.wikimedia.org/w/api.php?"
@@ -303,7 +307,7 @@ def get_place_images(place_name_en, city_name="", region_name=""):
         except Exception as e:
             continue
 
-    # ═══════════════════════════════════════════════════════
+    # ══════════════════════════════════════════════════════
     # الطريقة 2: البحث المباشر في Wikimedia Commons
     # ═══════════════════════════════════════════════════════
     search_queries = [
@@ -377,18 +381,13 @@ def get_place_images(place_name_en, city_name="", region_name=""):
                                         print(f"✅ صورة من Commons: {title}")
                                         
         except Exception as e:
-            print(f"️ خطأ في البحث عن '{query}': {e}")
+            print(f"⚠️ خطأ في البحث عن '{query}': {e}")
             continue
-
-    # ═══════════════════════════════════════════════════════
-    # الطريقة 3: استخدام Google Custom Search (إذا توفر)
-    # ═══════════════════════════════════════════════════════
-    # يمكن إضافتها لاحقاً إذا لزم الأمر
 
     if len(all_images) < 5:
         print(f"⚠️ تم العثور على {len(all_images)} صور فقط (أقل من 5)")
     
-    return all_images[:10]  # نرجع максимум 10 صور
+    return all_images[:10]  # نرجع maximum 10 صور
 
 
 # ═══════════════════════════════════════════════════════════
@@ -531,14 +530,18 @@ def api_place_details():
         }), 500
 
     # جلب صور متعددة (5 على الأقل)
-    print(f"️ جاري البحث عن صور لـ {name_en} في {city}")
+    print(f"🖼️ جاري البحث عن صور لـ {name_en} في {city}")
     images = get_place_images(name_en, city, region)
+
+    # الصورة الرئيسية هي أول صورة في القائمة
+    main_image = images[0] if images else ""
 
     return jsonify({
         "success": True,
         "details": description_text,
-        "images": images,  # قائمة بـ 5 صور على الأقل
-        "image_count": len(images),
+        "images": images,  # ✅ قائمة صور (5 على الأقل)
+        "image_url": main_image,  # ✅ الصورة الرئيسية (للتوافق مع الـ DTO القديم)
+        "image_count": len(images),  # ✅ عدد الصور
         "place_name_ar": name_ar,
         "place_name_en": name_en,
         "city": city,
