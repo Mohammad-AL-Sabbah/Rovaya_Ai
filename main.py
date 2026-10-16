@@ -1,7 +1,7 @@
 import os
 import json
 import pandas as pd
-from google import genai
+import google.generativeai as genai
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
@@ -11,9 +11,9 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-# إعداد Gemini API باستخدام المكتبة الجديدة
+# إعداد Gemini API (باستخدام المكتبة القديمة المستقرة)
 API_KEY = os.environ.get("GEMINI_API_KEY", "")
-client = genai.Client(api_key=API_KEY)
+genai.configure(api_key=API_KEY)
 
 # ═══════════════════════════════════════════════════════════
 # 2. قراءة ملف CSV
@@ -47,7 +47,7 @@ def build_user_request_from_options(options):
     return f"أريد رحلة لمدة {days} يوم في {cities}. عدد الأشخاص: {people}. الميزانية: {budget} دولار. الاهتمامات: {interests}. تاريخ البدء: {start_date}."
 
 # ═══════════════════════════════════════════════════════════
-# 4. دالة توليد الخطة (باستخدام المكتبة الجديدة)
+# 4. دالة توليد الخطة
 # ═══════════════════════════════════════════════════════════
 def generate_trip_plan(user_request):
     prompt = f"""
@@ -79,11 +79,11 @@ def generate_trip_plan(user_request):
 }}
 """
     try:
-        response = client.models.generate_content(
-            model="gemini-3.5-flash-lite",
-            contents=prompt,
-            config={"response_mime_type": "application/json"}
+        model = genai.GenerativeModel(
+            'gemini-3.5-flash-lite',
+            generation_config={"response_mime_type": "application/json"}
         )
+        response = model.generate_content(prompt)
         return json.loads(response.text)
     except Exception as e:
         return {"error": str(e)}
@@ -143,11 +143,9 @@ def api_place_details():
 """
     
     try:
-        response = client.models.generate_content(
-            model="gemini-3.5-flash-lite",
-            contents=prompt,
-            config={"response_mime_type": "text/plain"}
-        )
+        # ✅ استخدام نفس المكتبة القديمة هنا لتجنب أي أخطاء
+        model = genai.GenerativeModel('gemini-3.5-flash-lite')
+        response = model.generate_content(prompt)
         return jsonify({"success": True, "details": response.text})
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
